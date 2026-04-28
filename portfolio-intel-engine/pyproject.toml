@@ -10,6 +10,8 @@ dependencies = [
   "requests>=2.32",
   "python-dateutil>=2.9",
   "rich>=13.9",
+  "yfinance>=0.2.40",
+  "scikit-learn>=1.5",
 ]
 
 [build-system]

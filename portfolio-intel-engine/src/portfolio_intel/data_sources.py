@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
 
 import numpy as np
 import pandas as pd
 
+from portfolio_intel.marketdata import (
+    CachedOHLCVProvider,
+    DiskOHLCVCache,
+    OHLCVRequest,
+    OHLCVProvider,
+    default_cache_dir,
+    provider_from_env,
+)
 
 @dataclass(frozen=True)
 class MarketSnapshot:
@@ -70,6 +78,73 @@ class MockMarketDataProvider:
             vol_20d[t] = float(np.clip(0.15 + (h % 17) / 100.0, 0.12, 0.55))
 
         # crude clustering — user can replace with GICS mapping later
+        def cluster(t: str) -> str:
+            u = t.upper()
+            if u in {"QQQ", "SMH"}:
+                return "ETF"
+            if u in {"NVDA", "AVGO", "MU", "MRVL", "AMKR", "CLS", "AAOI", "GLW", "VRT", "NVTS"}:
+                return "Semis/Hardware"
+            if u in {"CRWD", "PLTR", "ORCL", "GOOGL", "APP", "TTD", "UBER", "NFLX", "SOFI", "HIMS"}:
+                return "Software/Internet"
+            if u in {"CVX", "SLB", "TOTDY"}:
+                return "Energy"
+            if u in {"PFE", "SNY", "ABCL", "UNH"}:
+                return "Healthcare/Biotech"
+            if u in {"OKLO", "CEG", "BE"}:
+                return "Power/Nuclear"
+            return "Other"
+
+        sector_proxy = {t: cluster(t) for t in tickers}
+        return MarketSnapshot(
+            as_of=as_of,
+            prices=prices,
+            returns_20d=returns_20d,
+            vol_20d=vol_20d,
+            sector_proxy=sector_proxy,
+        )
+
+
+class LiveMarketDataProvider:
+    """
+    Real market data snapshot built from OHLCV bars (default: Yahoo).
+    Provider selection via env var MARKET_DATA_PROVIDER: yahoo|alpaca|polygon
+    Cache stored under data/ohlcv_cache/.
+    """
+
+    def __init__(self, *, ohlcv_provider: OHLCVProvider | None = None) -> None:
+        inner = ohlcv_provider or provider_from_env()
+        self.ohlcv = CachedOHLCVProvider(inner, DiskOHLCVCache(default_cache_dir()))
+
+    def get_snapshot(self, tickers: list[str], as_of: date) -> MarketSnapshot:
+        # Build snapshot using daily bars up to as_of (UTC).
+        end = datetime(as_of.year, as_of.month, as_of.day, tzinfo=timezone.utc) + timedelta(days=1)
+        start = end - timedelta(days=70)
+
+        prices: dict[str, float] = {}
+        returns_20d: dict[str, float] = {}
+        vol_20d: dict[str, float] = {}
+
+        for t in tickers:
+            req = OHLCVRequest(ticker=t, start=start, end=end, timeframe="1d")
+            df = self.ohlcv.get_ohlcv(req)
+            if df.empty:
+                continue
+            close = df["close"].astype(float)
+            prices[t] = float(close.iloc[-1])
+            rets = close.pct_change().dropna()
+            if len(rets) >= 21:
+                window = rets.iloc[-20:]
+                returns_20d[t] = float((close.iloc[-1] / close.iloc[-21]) - 1.0)
+                vol_20d[t] = float(window.std(ddof=0) * np.sqrt(252))
+            elif len(rets) >= 5:
+                window = rets
+                returns_20d[t] = float((close.iloc[-1] / close.iloc[0]) - 1.0)
+                vol_20d[t] = float(window.std(ddof=0) * np.sqrt(252))
+            else:
+                returns_20d[t] = 0.0
+                vol_20d[t] = 0.25
+
+        # same clustering as mock provider
         def cluster(t: str) -> str:
             u = t.upper()
             if u in {"QQQ", "SMH"}:

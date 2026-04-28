@@ -12,6 +12,8 @@ dependencies = [
   "rich>=13.9",
   "yfinance>=0.2.40",
   "scikit-learn>=1.5",
+  "streamlit>=1.37",
+  "plotly>=5.22",
 ]
 
 [build-system]

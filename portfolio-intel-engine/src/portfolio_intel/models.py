@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, PositiveInt, confloat
@@ -8,6 +8,19 @@ from pydantic import BaseModel, Field, PositiveInt, confloat
 
 Action = Literal["BUY", "HOLD", "TRIM", "EXIT"]
 RiskLevel = Literal["low", "medium", "high"]
+RiskMode = Literal["aggressive", "medium", "low"]
+
+
+class Holding(BaseModel):
+    """
+    Expanded holding structure for UI.
+    """
+
+    symbol: str = Field(min_length=1)
+    name: str | None = None
+    quantity: confloat(gt=0)  # type: ignore[valid-type]
+    avg_buy_price: confloat(ge=0)  # type: ignore[valid-type]
+    reinvest: bool = False
 
 
 class Position(BaseModel):
@@ -63,4 +76,25 @@ class DailyReport(BaseModel):
     sim_vs_real_delta_summary: str
     email_subject: str
     email_body: str
+
+
+class TradeRecord(BaseModel):
+    portfolio_id: str
+    timestamp: datetime
+    symbol: str
+    action: Literal["BUY", "SELL", "TRIM", "EXIT", "REBALANCE", "HOLD"]
+    quantity_delta: float
+    price: float
+    notional: float
+    reason: str
+    features_snapshot: dict[str, float] = Field(default_factory=dict)
+    pnl_realized: float | None = None
+
+
+class ManagedPortfolio(BaseModel):
+    portfolio_id: str
+    name: str
+    risk_mode: RiskMode = "medium"
+    cash: confloat(ge=0)  # type: ignore[valid-type]
+    holdings: list[Holding] = Field(default_factory=list)
 

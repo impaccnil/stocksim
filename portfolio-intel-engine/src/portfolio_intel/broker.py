@@ -62,6 +62,14 @@ class PaperBroker:
         ts = utc_now()
         pnl_realized: float | None = None
 
+        # Special case: TRIM can be specified as a fraction (0<qty<1) of current position
+        if intent.action == "TRIM":
+            holding = _get_holding(portfolio, sym)
+            if holding is None:
+                raise ValueError(f"No existing holding for {sym}")
+            if 0.0 < qty < 1.0:
+                qty = float(holding.quantity) * qty
+
         if intent.action in {"BUY"}:
             notional = qty * price
             if notional > float(portfolio.cash) + 1e-9:

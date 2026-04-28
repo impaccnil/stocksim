@@ -12,7 +12,9 @@ from portfolio_intel.broker import OrderIntent, PaperBroker
 from portfolio_intel.importer import parse_holdings_csv
 from portfolio_intel.marketdata import CachedOHLCVProvider, DiskOHLCVCache, default_cache_dir, provider_from_env
 from portfolio_intel.risk_modes import cfg_for
+from portfolio_intel.strategy import HybridStrategy
 from portfolio_intel.store import PortfolioStore
+from portfolio_intel.eval import compute_trade_metrics
 
 
 st.set_page_config(page_title="Paper Portfolio Manager", layout="wide")
@@ -125,6 +127,7 @@ def main():
     store = _store()
     ohlcv = _ohlcv()
     broker = PaperBroker(store)
+    strat = HybridStrategy(ohlcv)
 
     portfolios = store.list_portfolios()
     if not portfolios:
@@ -147,6 +150,26 @@ def main():
         st.divider()
         st.header("Refresh")
         if st.button("Refresh prices"):
+            st.rerun()
+        st.divider()
+        st.header("Bot")
+        universe_txt = st.text_area(
+            "Universe (comma-separated tickers)",
+            value="QQQ, SMH, NVDA, AVGO, MU, GOOGL, ORCL, CRWD, PLTR, CVX, SLB",
+            height=80,
+        )
+        if st.button("Run one bot step (paper)"):
+            universe = [t.strip().upper() for t in universe_txt.split(",") if t.strip()]
+            intents = strat.propose_intents(selected, universe)
+            # Execute intents sequentially; failures are shown but do not stop the loop
+            executed = 0
+            for it in intents:
+                try:
+                    broker.apply_intent(selected, it)
+                    executed += 1
+                except Exception as e:
+                    st.warning(f"{it.action} {it.symbol} skipped: {e}")
+            st.success(f"Bot step complete. Executed {executed}/{len(intents)} intents.")
             st.rerun()
 
     cfg = cfg_for(selected.risk_mode)
@@ -218,6 +241,11 @@ def main():
     st.divider()
     st.subheader("Trade activity")
     trades = store.load_trades(selected.portfolio_id, limit=500)
+    pm = compute_trade_metrics(trades)
+    st.caption(
+        f"Trades: {pm.trades} | Win rate: {pm.win_rate*100:.1f}% | Total realized PnL: ${pm.total_pnl:,.2f} | "
+        f"Max drawdown (realized): ${pm.max_drawdown:,.2f}"
+    )
     _trades_panel(trades)
 
 
